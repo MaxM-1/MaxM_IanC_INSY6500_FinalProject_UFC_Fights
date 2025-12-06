@@ -5,12 +5,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 from scipy.stats import pearsonr, ttest_ind
 
-# Page config
 st.set_page_config(
-    page_title="UFC Fighter Analysis",
-    page_icon="🥊",
+    page_title="UFC Dashboard",
+    page_icon="ufc_icon.png",  # Path to your icon file
     layout="wide"
 )
+
 
 # Load data
 @st.cache_data
@@ -22,55 +22,132 @@ def load_data():
 
 attrs, hist, stats = load_data()
 
+# Precompute fighter records for use in tables
+fighter_records = (
+    hist.groupby('fighter_id')['fight_result']
+        .agg(
+            wins=lambda x: (x == 'W').sum(),
+            losses=lambda x: (x == 'L').sum(),
+            draws=lambda x: (x == 'D').sum(),
+            no_contests=lambda x: (x == 'NC').sum(),
+            total_fights='count'
+        )
+        .reset_index()
+)
+
+fighter_records['record'] = (
+    fighter_records['wins'].astype(str) + "-" +
+    fighter_records['losses'].astype(str) + "-" +
+    fighter_records['draws'].astype(str)
+)
 # Title
-st.title("🥊 UFC Fighter Data Analysis")
+st.image("ufc_icon.png", width=150)
+st.title("UFC Fighter Analytics")
 st.markdown("Interactive exploration of UFC fighter statistics, performance, and trends.")
+
+with st.sidebar:
+    st.image("ufc_icon.png", width=120)
+    st.markdown("### UFC Data Dashboard")
 
 # Sidebar navigation
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Select Analysis", [
-    "📊 Data Overview",
-    "👴 Age Analysis",
-    "🥋 Fighter Style Analysis",
-    "📏 Reach/Height Ratio",
+    "Data Overview",
+    "Age Analysis",
+    "Fighter Style Analysis",
+    "Reach/Height Ratio",
     "🇷🇺 Russian Grappler Dominance"
 ])
 
 # ============================================
 # PAGE 1: Data Overview
 # ============================================
-if page == "📊 Data Overview":
-    st.header("Data Overview")
-    
+if page == "Data Overview":
+    st.header("Fighter Directory")
+
+    # Merge attributes with records
+    fighter_table = attrs.merge(
+        fighter_records[
+            ['fighter_id', 'wins', 'losses', 'draws', 'no_contests', 'total_fights', 'record']
+        ],
+        on='fighter_id',
+        how='left'
+    )
+
+    # Optional: choose which columns to show first
+    cols_front = [
+        'name', 'record', 'total_fights', 'wins', 'losses', 'draws',
+        'weight_class', 'country', 'style', 'height', 'reach'
+    ]
+    # Keep only columns that actually exist + all remaining ones
+    cols_front = [c for c in cols_front if c in fighter_table.columns]
+    remaining_cols = [c for c in fighter_table.columns if c not in cols_front]
+    fighter_table = fighter_table[cols_front + remaining_cols]
+
+    # 🔍 Search + filter controls
+    col_search, col_wc = st.columns([2, 1])
+
+    with col_search:
+        name_query = st.text_input("Search fighter by name", value="")
+
+    with col_wc:
+        wc_options = ["All weight classes"] + sorted(fighter_table['weight_class'].dropna().unique().tolist())
+        selected_wc = st.selectbox("Filter by weight class", wc_options)
+
+    filtered = fighter_table.copy()
+
+    if name_query:
+        filtered = filtered[filtered['name'].str.contains(name_query, case=False, na=False)]
+
+    if selected_wc != "All weight classes":
+        filtered = filtered[filtered['weight_class'] == selected_wc]
+
+    # Scrollable, wide fighter table
+    st.subheader("All Fighters (Attributes + Record)")
+    st.dataframe(
+        filtered,
+        use_container_width=True,
+        height=400  # makes it scrollable
+    )
+
+    st.markdown("---")
+    st.subheader("Dataset Summary")
+
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Fighters", f"{len(attrs):,}")
-    col2.metric("Fight Records", f"{len(hist):,}")
+    col2.metric("Total Fights", f"{len(hist):,}")
     col3.metric("Countries", f"{attrs['country'].nunique()}")
-    
-    st.subheader("Fighter Attributes Sample")
-    st.dataframe(attrs.head(20))
-    
+
     # Weight class distribution
     st.subheader("Fighters by Weight Class")
     wc_counts = attrs['weight_class'].value_counts()
-    fig = px.bar(x=wc_counts.index, y=wc_counts.values, 
-                 labels={'x': 'Weight Class', 'y': 'Count'},
-                 color=wc_counts.values, color_continuous_scale='viridis')
+    fig = px.bar(
+        x=wc_counts.index,
+        y=wc_counts.values, 
+        labels={'x': 'Weight Class', 'y': 'Count'},
+        color=wc_counts.values,
+        color_continuous_scale='viridis'
+    )
     st.plotly_chart(fig, use_container_width=True)
     
     # Country distribution
     st.subheader("Top 15 Countries")
     country_counts = attrs['country'].value_counts().head(15)
-    fig2 = px.bar(x=country_counts.values, y=country_counts.index, orientation='h',
-                  labels={'x': 'Number of Fighters', 'y': 'Country'},
-                  color=country_counts.values, color_continuous_scale='reds')
+    fig2 = px.bar(
+        x=country_counts.values,
+        y=country_counts.index,
+        orientation='h',
+        labels={'x': 'Number of Fighters', 'y': 'Country'},
+        color=country_counts.values,
+        color_continuous_scale='reds'
+    )
     fig2.update_layout(yaxis={'categoryorder': 'total ascending'})
     st.plotly_chart(fig2, use_container_width=True)
 
 # ============================================
 # PAGE 2: Age Analysis
 # ============================================
-elif page == "👴 Age Analysis":
+elif page == "Age Analysis":
     st.header("Does Fighter Age Affect Performance?")
     
     # Prepare data
@@ -114,13 +191,13 @@ elif page == "👴 Age Analysis":
         st.plotly_chart(fig2, use_container_width=True)
     
     # Key insight
-    st.info("📉 **Key Finding**: Win rate generally decreases as fighter age increases, " 
+    st.info("**Key Finding**: Win rate generally decreases as fighter age increases, " 
             "suggesting that younger fighters tend to have better performance outcomes.")
 
 # ============================================
 # PAGE 3: Fighter Style Analysis
 # ============================================
-elif page == "🥋 Fighter Style Analysis":
+elif page == "Fighter Style Analysis":
     st.header("Fighter Style Analysis")
     
     # Prepare data
@@ -187,12 +264,12 @@ elif page == "🥋 Fighter Style Analysis":
     col1.metric("Striker KO Rate", f"{striker_ko:.1%}")
     col2.metric("Non-Striker KO Rate", f"{non_striker_ko:.1%}")
     
-    st.success(f"✅ Strikers have a **{(striker_ko - non_striker_ko)*100:.1f}%** higher KO rate than non-strikers")
+    st.success(f"Strikers have a **{(striker_ko - non_striker_ko)*100:.1f}%** higher KO rate than non-strikers")
 
 # ============================================
 # PAGE 4: Reach/Height Ratio Analysis
 # ============================================
-elif page == "📏 Reach/Height Ratio":
+elif page == "Reach/Height Ratio":
     st.header("Reach-to-Height Ratio Analysis")
     st.markdown("**Hypothesis**: Fighters with longer reach relative to height have better records")
     
@@ -319,9 +396,9 @@ elif page == "🇷🇺 Russian Grappler Dominance":
         st.write(f"**T-test p-value**: {p_val:.4f}")
         
         if p_val < 0.05:
-            st.success("✅ The difference is statistically significant!")
+            st.success("The difference is statistically significant!")
         else:
-            st.warning("⚠️ The difference is not statistically significant.")
+            st.warning("The difference is not statistically significant.")
     
     # Top Russian grapplers
     st.subheader("Top Russian Grapplers")

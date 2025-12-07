@@ -194,6 +194,58 @@ elif page == "Age Analysis":
     st.info("**Key Finding**: Win rate generally decreases as fighter age increases, " 
             "suggesting that younger fighters tend to have better performance outcomes.")
 
+    # --- Win Probability vs. Age (by year) with regression line and p-value ---
+    st.subheader("Win Probability vs. Age (by Year)")
+    merged_filtered['win_binary'] = (merged_filtered['fight_result'] == 'W').astype(int)
+    win_rate_by_age = merged_filtered.groupby(merged_filtered['age_at_fight'].round())['win_binary'].mean()
+
+    # Logistic regression for win probability
+    import statsmodels.api as sm
+    age_vals = merged_filtered['age_at_fight'].values
+    win_vals = merged_filtered['win_binary'].values
+    age_grid = np.linspace(age_vals.min(), age_vals.max(), 100)
+    X = sm.add_constant(age_vals)
+    logit_model = sm.Logit(win_vals, X, missing='drop').fit(disp=0)
+    X_pred = sm.add_constant(age_grid)
+    win_pred = logit_model.predict(X_pred)
+
+    import plotly.graph_objects as go
+    fig3 = go.Figure()
+    fig3.add_trace(go.Scatter(x=win_rate_by_age.index, y=win_rate_by_age.values,
+                              mode='lines+markers', name='Actual Win Rate'))
+    fig3.add_trace(go.Scatter(x=age_grid, y=win_pred, mode='lines', name='Logistic Regression',
+                              line=dict(color='green', dash='dash')))
+    # Get p-value for age coefficient
+    pval_win = logit_model.pvalues[1] if len(logit_model.pvalues) > 1 else None
+    pval_text_win = f"p-value (age): {pval_win:.4g}" if pval_win is not None else "p-value unavailable"
+    fig3.update_layout(title='Win Probability vs. Age (Actual + Regression)',
+                      xaxis_title='Age at Fight', yaxis_title='Win Probability', yaxis_range=[0, 1],
+                      annotations=[dict(x=age_grid.mean(), y=0.98, text=pval_text_win, showarrow=False, font=dict(size=12, color='green'))])
+    st.plotly_chart(fig3, use_container_width=True)
+
+    # --- KO Risk vs. Age (by year) with regression line ---
+    st.subheader("KO Risk vs. Age (by Year)")
+    merged_filtered['ko_suffered'] = ((merged_filtered['fight_result'] == 'L') & (merged_filtered['fight_result_type'] == 'KO-TKO')).astype(int)
+    ko_risk_by_age = merged_filtered.groupby(merged_filtered['age_at_fight'].round())['ko_suffered'].mean()
+
+    # Logistic regression for KO risk
+    ko_vals = merged_filtered['ko_suffered'].values
+    logit_model_ko = sm.Logit(ko_vals, X, missing='drop').fit(disp=0)
+    ko_pred = logit_model_ko.predict(X_pred)
+
+    fig4 = go.Figure()
+    fig4.add_trace(go.Scatter(x=ko_risk_by_age.index, y=ko_risk_by_age.values,
+                              mode='lines+markers', name='Actual KO Risk', line=dict(color='red')))
+    fig4.add_trace(go.Scatter(x=age_grid, y=ko_pred, mode='lines', name='Logistic Regression',
+                              line=dict(color='black', dash='dash')))
+    # Get p-value for age coefficient (KO risk)
+    pval_ko = logit_model_ko.pvalues[1] if len(logit_model_ko.pvalues) > 1 else None
+    pval_text_ko = f"p-value (age): {pval_ko:.4g}" if pval_ko is not None else "p-value unavailable"
+    fig4.update_layout(title='KO Risk vs. Age (Actual + Regression)',
+                      xaxis_title='Age at Fight', yaxis_title='KO Risk', yaxis_range=[0, 1],
+                      annotations=[dict(x=age_grid.mean(), y=0.98, text=pval_text_ko, showarrow=False, font=dict(size=12, color='red'))])
+    st.plotly_chart(fig4, use_container_width=True)
+
 # ============================================
 # PAGE 3: Fighter Style Analysis
 # ============================================

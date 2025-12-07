@@ -199,6 +199,7 @@ elif page == "Age Analysis":
 # ============================================
 elif page == "Fighter Style Analysis":
     st.header("Fighter Style Analysis")
+    min_wins = 5
     
     # Prepare data
     wins = hist[hist['fight_result'] == 'W'].copy()
@@ -210,7 +211,7 @@ elif page == "Fighter Style Analysis":
     wins_merged = wins.merge(attrs[['fighter_id', 'style']], on='fighter_id', how='left')
     
     # Filter styles
-    min_wins = st.slider("Minimum wins to include style", 10, 100, 20)
+    
     
     style_finish = wins_merged.groupby(['style', 'finish_category']).size().reset_index(name='count')
     style_totals = style_finish.groupby('style')['count'].sum()
@@ -272,7 +273,7 @@ elif page == "Fighter Style Analysis":
 elif page == "Reach/Height Ratio":
     st.header("Reach-to-Height Ratio Analysis")
     st.markdown("**Hypothesis**: Fighters with longer reach relative to height have better records")
-    
+    min_fights = 3
     # Calculate ratio
     attrs['reach_height_ratio'] = attrs['reach'] / attrs['height']
     
@@ -288,7 +289,6 @@ elif page == "Reach/Height Ratio":
     df = attrs.merge(fighter_records, on='fighter_id', how='inner')
     
     # Filters
-    min_fights = st.slider("Minimum fights", 1, 20, 3)
     df_filtered = df[(df['reach_height_ratio'].notna()) & (df['total_fights'] >= min_fights)]
     
     # Stats
@@ -332,7 +332,7 @@ elif page == "Reach/Height Ratio":
 elif page == "🇷🇺 Russian Grappler Dominance":
     st.header("Russian Grappler Dominance Analysis")
     st.markdown("Are Russian grapplers more dominant in the UFC?")
-    
+    min_fights = 3
     # Define grapplers
     grappling_styles = ['wrestling', 'brazilian jiu-jitsu', 'grappling', 'sambo', 'judo']
     attrs['is_grappler'] = attrs['style'].fillna('').str.lower().isin(grappling_styles)
@@ -360,7 +360,7 @@ elif page == "🇷🇺 Russian Grappler Dominance":
     
     df = attrs.merge(fighter_records, on='fighter_id', how='inner')
     
-    min_fights = st.slider("Minimum fights", 1, 15, 3)
+   
     df_filtered = df[df['total_fights'] >= min_fights]
     
     # Category stats

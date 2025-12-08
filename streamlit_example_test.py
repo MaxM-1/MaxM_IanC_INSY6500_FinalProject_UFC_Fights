@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from scipy.stats import pearsonr, ttest_ind
+from scipy.stats import pearsonr, ttest_ind, norm, chi2_contingency
 
 st.set_page_config(
     page_title="UFC Dashboard",
@@ -253,7 +253,7 @@ elif page == "Fighter Style Analysis":
     st.header("Fighter Style Analysis")
     min_wins = 5
     
-    # Prepare data
+    # Prepare data: only wins, and simplified finish categories
     wins = hist[hist['fight_result'] == 'W'].copy()
     wins['finish_category'] = np.where(
         wins['fight_result_type'] == 'KO-TKO', 'KO/TKO',
@@ -262,15 +262,14 @@ elif page == "Fighter Style Analysis":
     
     wins_merged = wins.merge(attrs[['fighter_id', 'style']], on='fighter_id', how='left')
     
-    # Filter styles
-    
-    
+    # -----------------------------
+    # 1. Finish tendencies by style
+    # -----------------------------
     style_finish = wins_merged.groupby(['style', 'finish_category']).size().reset_index(name='count')
     style_totals = style_finish.groupby('style')['count'].sum()
     valid_styles = style_totals[style_totals >= min_wins].index
     style_finish = style_finish[style_finish['style'].isin(valid_styles)]
     
-    # Calculate rates
     style_stats = wins_merged[wins_merged['style'].isin(valid_styles)].groupby('style').agg(
         total_wins=('fight_result', 'count'),
         ko_wins=('finish_category', lambda x: (x == 'KO/TKO').sum()),
@@ -281,43 +280,251 @@ elif page == "Fighter Style Analysis":
     style_stats = style_stats.sort_values('ko_rate', ascending=False)
     
     col1, col2 = st.columns(2)
-    
     with col1:
         st.subheader("KO/TKO Rate by Style")
-        fig = px.bar(x=style_stats.index, y=style_stats['ko_rate'],
-                     labels={'x': 'Fighting Style', 'y': 'KO/TKO Rate'},
-                     color=style_stats['ko_rate'], color_continuous_scale='reds')
+        fig = px.bar(
+            x=style_stats.index,
+            y=style_stats['ko_rate'],
+            labels={'x': 'Fighting Style', 'y': 'KO/TKO Rate'},
+            color=style_stats['ko_rate'],
+            color_continuous_scale='reds'
+        )
         fig.update_xaxes(tickangle=45)
         st.plotly_chart(fig, use_container_width=True)
     
     with col2:
         st.subheader("Submission Rate by Style")
-        fig2 = px.bar(x=style_stats.sort_values('sub_rate', ascending=False).index, 
-                      y=style_stats.sort_values('sub_rate', ascending=False)['sub_rate'],
-                      labels={'x': 'Fighting Style', 'y': 'Submission Rate'},
-                      color=style_stats.sort_values('sub_rate', ascending=False)['sub_rate'], 
-                      color_continuous_scale='greens')
+        style_sub_sorted = style_stats.sort_values('sub_rate', ascending=False)
+        fig2 = px.bar(
+            x=style_sub_sorted.index,
+            y=style_sub_sorted['sub_rate'],
+            labels={'x': 'Fighting Style', 'y': 'Submission Rate'},
+            color=style_sub_sorted['sub_rate'],
+            color_continuous_scale='greens'
+        )
         fig2.update_xaxes(tickangle=45)
         st.plotly_chart(fig2, use_container_width=True)
     
-    # Striker vs non-striker comparison
-    st.subheader("Striker vs Non-Striker KO Rate")
+    st.markdown("---")
+
+    # -----------------------------
+    # 1b. Finish type rates by style *category* + chi-square test
+    # -----------------------------
+    st.subheader("Finish Type Rates by Style Category")
+
+    # Classify fighters into style categories
+    def classify_style(style):
+        if pd.isna(style):
+            return "Generalist"
+        s = style.lower()
+
+        bjj_keywords = ["bjj", "brazilian jiu jitsu", "jiu-jitsu", "jiu jitsu"]
+        if any(k in s for k in bjj_keywords):
+            return "BJJ"
+
+        wrestling_keywords = ["wrestling", "wrestler", "freestyle wrestling", "folkstyle"]
+        if any(k in s for k in wrestling_keywords):
+            return "Wrestler"
+
+        striking_keywords = [
+            "boxing", "kickboxing", "muay thai", "striker",
+            "taekwondo", "karate", "savate"
+        ]
+        if any(k in s for k in striking_keywords):
+            return "Striker"
+
+        return "Generalist"
+
+    attrs['style_group'] = attrs['style'].apply(classify_style)
+
+    wins_style = wins.merge(
+        attrs[['fighter_id', 'style_group']],
+        on='fighter_id',
+        how='left'
+    )
+
+    # Contingency table: style_group x finish_category
+    finish_table = pd.crosstab(
+        wins_style['style_group'],
+        wins_style['finish_category']
+    )
+
+    # Convert to rates (row-wise proportions)
+    finish_rates = finish_table.div(finish_table.sum(axis=1), axis=0)
+
+    # Plot grouped bar chart of finish type rates by style category
+    finish_long = (
+        finish_rates
+        .reset_index()
+        .melt(id_vars='style_group', var_name='Finish Type', value_name='Rate')
+    )
+
+    fig_cat = px.bar(
+        finish_long,
+        x='style_group',
+        y='Rate',
+        color='Finish Type',
+        barmode='group',
+        labels={'style_group': 'Style Category', 'Rate': 'Proportion of Wins'},
+        range_y=[0, 1]
+    )
+    fig_cat.update_layout(legend_title_text="Finish Type")
+    st.plotly_chart(fig_cat, use_container_width=True)
+
+    # Chi-square test of independence: does finish type depend on style category?
+    chi2, p_finish, dof, expected = chi2_contingency(finish_table)
+
+    st.write(f"**Chi-square test p-value:** {p_finish:.4g}")
+    if p_finish < 0.05:
+        st.success(
+            "Finish type **does** depend on style category (statistically significant). "
+            "This supports the idea that different style groups tend to win in different ways "
+            "(for example, strikers by KO/TKO and BJJ specialists by submission)."
+        )
+    else:
+        st.info(
+            "Finish type does **not** show a statistically significant dependence on style category "
+            "at the 5% level. The observed differences in finish patterns could be due to chance."
+        )
+
+    st.markdown("---")
     
-    striking_keywords = ["boxing", "kickboxing", "muay thai", "striker", "taekwondo", "karate"]
+    # -----------------------------
+    # 2. Strikers vs Non-Strikers (KO rate + z-test)
+    # -----------------------------
+    st.subheader("Strikers vs Non-Strikers: KO/TKO Finish Rate")
+    
+    striking_keywords = ["boxing", "kickboxing", "muay thai", "striker", "taekwondo", "karate", "savate"]
     attrs['is_striker'] = attrs['style'].fillna('').str.lower().apply(
-        lambda x: any(k in x for k in striking_keywords)
+        lambda s: any(k in s for k in striking_keywords)
     )
     
     wins_striker = wins.merge(attrs[['fighter_id', 'is_striker']], on='fighter_id', how='left')
     
-    striker_ko = (wins_striker[wins_striker['is_striker'] == True]['finish_category'] == 'KO/TKO').mean()
-    non_striker_ko = (wins_striker[wins_striker['is_striker'] == False]['finish_category'] == 'KO/TKO').mean()
+    # Counts and totals
+    ko_strikers = ((wins_striker['is_striker'] == True)  & (wins_striker['finish_category'] == "KO/TKO")).sum()
+    ko_non      = ((wins_striker['is_striker'] == False) & (wins_striker['finish_category'] == "KO/TKO")).sum()
+    total_strikers = (wins_striker['is_striker'] == True).sum()
+    total_non      = (wins_striker['is_striker'] == False).sum()
     
-    col1, col2 = st.columns(2)
-    col1.metric("Striker KO Rate", f"{striker_ko:.1%}")
-    col2.metric("Non-Striker KO Rate", f"{non_striker_ko:.1%}")
+    striker_rate = ko_strikers / total_strikers if total_strikers > 0 else np.nan
+    non_striker_rate = ko_non / total_non if total_non > 0 else np.nan
     
-    st.success(f"Strikers have a **{(striker_ko - non_striker_ko)*100:.1f}%** higher KO rate than non-strikers")
+    # Two-proportion z-test for KO rates
+    if total_strikers > 0 and total_non > 0:
+        p_pool = (ko_strikers + ko_non) / (total_strikers + total_non)
+        se = np.sqrt(p_pool * (1 - p_pool) * (1/total_strikers + 1/total_non))
+        z_stat = (striker_rate - non_striker_rate) / se
+        p_ko = 2 * (1 - norm.cdf(abs(z_stat)))
+    else:
+        z_stat, p_ko = np.nan, np.nan
+    
+    # Bar chart
+    ko_df = pd.DataFrame({
+        "Group": ["Striker", "Non-striker"],
+        "KO Rate": [striker_rate, non_striker_rate]
+    })
+    fig_ko = px.bar(
+        ko_df,
+        x="Group",
+        y="KO Rate",
+        range_y=[0, 1],
+        text=ko_df["KO Rate"].apply(lambda v: f"{v:.1%}" if pd.notna(v) else "N/A"),
+        labels={"KO Rate": "KO/TKO Win Rate"}
+    )
+    fig_ko.update_traces(textposition="outside")
+    st.plotly_chart(fig_ko, use_container_width=True)
+    
+    st.write(
+        f"**Striker KO/TKO rate:** {striker_rate:.1%} "
+        f"vs **Non-striker KO/TKO rate:** {non_striker_rate:.1%}"
+    )
+    if not np.isnan(p_ko):
+        st.write(f"**Two-proportion z-test p-value:** {p_ko:.4g}")
+        if p_ko < 0.05:
+            st.success(
+                "This difference is statistically significant, suggesting that "
+                "strikers are genuinely more likely to win by KO/TKO than non-strikers."
+            )
+        else:
+            st.info(
+                "This difference is *not* statistically significant at the 5% level, "
+                "so we cannot confidently say strikers have a higher KO/TKO rate than non-strikers."
+            )
+    
+    st.markdown("---")
+    
+    # -----------------------------
+    # 3. Grapplers vs Non-Grapplers (Submission rate + z-test)
+    # -----------------------------
+    st.subheader("Grapplers vs Non-Grapplers: Submission Finish Rate")
+    
+    def is_grappler(style):
+        if pd.isna(style):
+            return False
+        s = style.lower()
+        grappling_keywords = [
+            "bjj", "brazilian jiu jitsu", "jiu-jitsu", "jiu jitsu",
+            "grappler", "wrestling", "wrestler", "sambo", "judo"
+        ]
+        return any(k in s for k in grappling_keywords)
+    
+    attrs['is_grappler'] = attrs['style'].apply(is_grappler)
+    
+    wins_grappler = wins.merge(attrs[['fighter_id', 'is_grappler']], on='fighter_id', how='left')
+    wins_grappler['SUB_binary'] = wins_grappler['finish_category'].apply(
+        lambda x: 1 if x == "Submission" else 0
+    )
+    
+    sub_grapplers = wins_grappler[(wins_grappler['is_grappler'] == True)  & (wins_grappler['SUB_binary'] == 1)].shape[0]
+    sub_non       = wins_grappler[(wins_grappler['is_grappler'] == False) & (wins_grappler['SUB_binary'] == 1)].shape[0]
+    total_grapplers = (wins_grappler['is_grappler'] == True).sum()
+    total_non_grap = (wins_grappler['is_grappler'] == False).sum()
+    
+    grappler_rate = sub_grapplers / total_grapplers if total_grapplers > 0 else np.nan
+    non_grappler_rate = sub_non / total_non_grap if total_non_grap > 0 else np.nan
+    
+    # Two-proportion z-test for submission rates
+    if total_grapplers > 0 and total_non_grap > 0:
+        p_pool_sub = (sub_grapplers + sub_non) / (total_grapplers + total_non_grap)
+        se_sub = np.sqrt(p_pool_sub * (1 - p_pool_sub) * (1/total_grapplers + 1/total_non_grap))
+        z_sub = (grappler_rate - non_grappler_rate) / se_sub
+        p_sub = 2 * (1 - norm.cdf(abs(z_sub)))
+    else:
+        z_sub, p_sub = np.nan, np.nan
+    
+    # Bar chart
+    sub_df = pd.DataFrame({
+        "Group": ["Grappler", "Non-grappler"],
+        "Submission Rate": [grappler_rate, non_grappler_rate]
+    })
+    fig_sub = px.bar(
+        sub_df,
+        x="Group",
+        y="Submission Rate",
+        range_y=[0, 1],
+        text=sub_df["Submission Rate"].apply(lambda v: f"{v:.1%}" if pd.notna(v) else "N/A"),
+        labels={"Submission Rate": "Submission Win Rate"}
+    )
+    fig_sub.update_traces(textposition="outside")
+    st.plotly_chart(fig_sub, use_container_width=True)
+    
+    st.write(
+        f"**Grappler submission rate:** {grappler_rate:.1%} "
+        f"vs **Non-grappler submission rate:** {non_grappler_rate:.1%}"
+    )
+    if not np.isnan(p_sub):
+        st.write(f"**Two-proportion z-test p-value:** {p_sub:.4g}")
+        if p_sub < 0.05:
+            st.success(
+                "This difference is statistically significant, suggesting that grapplers "
+                "are genuinely more likely to win by submission than non-grapplers."
+            )
+        else:
+            st.info(
+                "This difference is *not* statistically significant at the 5% level, "
+                "so we cannot confidently say grapplers have a higher submission rate."
+            )
 
 # ============================================
 # PAGE 4: Reach/Height Ratio Analysis

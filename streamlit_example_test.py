@@ -144,6 +144,192 @@ if page == "Data Overview":
     fig2.update_layout(yaxis={'categoryorder': 'total ascending'})
     st.plotly_chart(fig2, use_container_width=True)
 
+
+# ------------------------------------
+    # AGE DISTRIBUTION (Overall)
+    # ------------------------------------
+    st.subheader("Age Distribution of Fighters")
+
+    # Compute ages
+    attrs['dob'] = pd.to_datetime(attrs['dob'], errors='coerce')
+    today = pd.to_datetime("today")
+    attrs['age_years'] = (today - attrs['dob']).dt.days / 365.25
+
+    # Keep reasonable ages
+    age_data = attrs['age_years'].dropna()
+    age_data = age_data[(age_data >= 18) & (age_data <= 50)]
+
+    mean_age = age_data.mean()
+    median_age = age_data.median()
+
+    # Skinny histogram settings
+    fig_age = px.histogram(
+        age_data,
+        nbins=40,                   # more bins → skinnier histogram
+        labels={'value': 'Age (years)', 'count': 'Fighter Count'},
+        title="Overall Age Distribution",
+        opacity=0.8
+    )
+
+    # Add mean and median lines
+    fig_age.add_vline(x=mean_age, line_dash="dash", line_color="red",
+                      annotation_text=f"Mean: {mean_age:.1f}", annotation_position="top left")
+    fig_age.add_vline(x=median_age, line_dash="dot", line_color="blue",
+                      annotation_text=f"Median: {median_age:.1f}", annotation_position="top right")
+
+    # Make bars skinny-looking
+    fig_age.update_layout(
+        bargap=0.08,               # spacing between bars
+        width=800,                 # skinnier look
+        height=350
+    )
+
+    st.plotly_chart(fig_age, use_container_width=True)
+
+# ------------------------------------
+    # Top 10 Fighting Styles
+    # ------------------------------------
+    st.subheader("Top 10 Fighting Styles (by Number of Fighters)")
+
+    style_counts = (
+        attrs['style']
+        .fillna("Unknown")
+        .value_counts()
+        .head(10)
+    )
+
+    fig_styles = px.bar(
+        x=style_counts.values,
+        y=style_counts.index,
+        orientation='h',
+        labels={'x': 'Number of Fighters', 'y': 'Fighting Style'},
+        title="Top 10 Fighting Styles"
+    )
+    fig_styles.update_layout(yaxis={'categoryorder': 'total ascending'})
+    st.plotly_chart(fig_styles, use_container_width=True)
+
+# ------------------------------------
+    # Number of Fights per Year
+    # ------------------------------------
+    st.subheader("Number of Fights per Year")
+
+    hist['event_date'] = pd.to_datetime(hist['event_date'], errors='coerce')
+    fights_per_year = (
+        hist['event_date']
+        .dt.year
+        .dropna()
+        .astype(int)
+        .value_counts()
+        .sort_index()
+    )
+
+    fig_fights_year = px.bar(
+        x=fights_per_year.index,
+        y=fights_per_year.values,
+        labels={'x': 'Year', 'y': 'Number of Fights'},
+        title="Fights per Year"
+    )
+    st.plotly_chart(fig_fights_year, use_container_width=True)
+
+# ------------------------------------
+    # Top 15 Fighters (Wins)
+    # ------------------------------------
+    st.subheader("Top 15 Fighters (Wins)")
+
+    # Work from wins only to get KO/Sub breakdown
+    wins_only = hist[hist['fight_result'] == 'W'].copy()
+    wins_only['ko_win'] = (wins_only['fight_result_type'] == 'KO-TKO').astype(int)
+    wins_only['sub_win'] = (wins_only['fight_result_type'] == 'SUBMISSION').astype(int)
+
+    finish_counts = (
+        wins_only
+        .groupby('fighter_id')
+        .agg(
+            ko_wins=('ko_win', 'sum'),
+            sub_wins=('sub_win', 'sum')
+        )
+        .reset_index()
+    )
+
+    # Merge with precomputed fighter_records (which already has total wins)
+    fighter_summary = fighter_records.merge(finish_counts, on='fighter_id', how='left')
+    fighter_summary[['ko_wins', 'sub_wins']] = fighter_summary[['ko_wins', 'sub_wins']].fillna(0)
+
+    # Attach fighter names and weight class
+    fighter_summary = fighter_summary.merge(
+        attrs[['fighter_id', 'name', 'weight_class']],
+        on='fighter_id',
+        how='left'
+    )
+
+    # Top 15 by total wins
+    top_total = (
+        fighter_summary
+        .sort_values('wins', ascending=False)
+        .head(15)
+    )
+
+    # Top 15 by KO/TKO wins
+    top_ko = (
+        fighter_summary
+        .sort_values('ko_wins', ascending=False)
+        .head(15)
+    )
+
+    # Top 15 by submission wins
+    top_sub = (
+        fighter_summary
+        .sort_values('sub_wins', ascending=False)
+        .head(15)
+    )
+
+    tab1, tab2, tab3 = st.tabs([
+        "Top 15 by Total Wins",
+        "Top 15 by KO/TKO Wins",
+        "Top 15 by Submission Wins"
+    ])
+
+    with tab1:
+        fig_top_total = px.bar(
+            top_total,
+            x='wins',
+            y='name',
+            orientation='h',
+            labels={'wins': 'Total Wins', 'name': 'Fighter'},
+            title="Top 15 Fighters by Total Wins",
+            text='wins'
+        )
+        fig_top_total.update_layout(yaxis={'categoryorder': 'total ascending'})
+        st.plotly_chart(fig_top_total, use_container_width=True)
+
+    with tab2:
+        fig_top_ko = px.bar(
+            top_ko,
+            x='ko_wins',
+            y='name',
+            orientation='h',
+            labels={'ko_wins': 'KO/TKO Wins', 'name': 'Fighter'},
+            title="Top 15 Fighters by KO/TKO Wins",
+            text='ko_wins'
+        )
+        fig_top_ko.update_layout(yaxis={'categoryorder': 'total ascending'})
+        st.plotly_chart(fig_top_ko, use_container_width=True)
+
+    with tab3:
+        fig_top_sub = px.bar(
+            top_sub,
+            x='sub_wins',
+            y='name',
+            orientation='h',
+            labels={'sub_wins': 'Submission Wins', 'name': 'Fighter'},
+            title="Top 15 Fighters by Submission Wins",
+            text='sub_wins'
+        )
+        fig_top_sub.update_layout(yaxis={'categoryorder': 'total ascending'})
+        st.plotly_chart(fig_top_sub, use_container_width=True)
+
+
+    
 # ============================================
 # PAGE 2: Age Analysis
 # ============================================
@@ -585,6 +771,72 @@ elif page == "Reach/Height Ratio":
                   color=quintile_rates.values, color_continuous_scale='RdYlGn')
     st.plotly_chart(fig2, use_container_width=True)
 
+# ------------------------------------
+    # Correlation between Reach/Height Ratio and Win Rate by Fighting Style
+    # ------------------------------------
+    st.subheader("Correlation Between Reach/Height Ratio and Win Rate by Fighting Style")
+
+    # Compute correlation per *raw* style (not grouped)
+    corr_rows = []
+    # Drop styles that are missing
+    df_style = df_filtered.dropna(subset=['style']).copy()
+
+    for style, sub in df_style.groupby('style'):
+        # Require a reasonable sample size and variation
+        if (
+            len(sub) >= 10 and
+            sub['reach_height_ratio'].nunique() > 1 and
+            sub['win_rate'].nunique() > 1
+        ):
+            c, p = pearsonr(sub['reach_height_ratio'], sub['win_rate'])
+            corr_rows.append({
+                "style": style,
+                "correlation": c,
+                "p_value": p,
+                "n_fighters": len(sub)
+            })
+
+    if corr_rows:
+        corr_df = pd.DataFrame(corr_rows)
+
+        # Sort so negative correlations at top, positives at bottom (like your example)
+        corr_df = corr_df.sort_values("correlation", ascending=True)
+
+        # Color bars: red for negative, green for positive
+        colors = ["#e74c3c" if c < 0 else "#27ae60" for c in corr_df["correlation"]]
+
+        # Horizontal bar chart
+        fig_style_corr = go.Figure(
+            go.Bar(
+                x=corr_df["correlation"],
+                y=corr_df["style"],
+                orientation="h",
+                marker_color=colors
+            )
+        )
+
+        # Vertical line at 0
+        fig_style_corr.add_vline(x=0, line_width=2, line_color="black")
+
+        fig_style_corr.update_layout(
+            title="Correlation between Reach/Height Ratio and Win Rate by Fighting Style",
+            xaxis_title="Correlation (Reach/Height Ratio vs Win Rate)",
+            yaxis_title="Fighting Style",
+            xaxis=dict(range=[-0.35, 0.35])  # tweak this if your values are narrower/wider
+        )
+
+        st.plotly_chart(fig_style_corr, use_container_width=True)
+
+        # Optional: show numeric table below
+        st.dataframe(
+            corr_df[["style", "correlation", "p_value", "n_fighters"]].style.format({
+                "correlation": "{:.3f}",
+                "p_value": "{:.4f}"
+            })
+        )
+    else:
+        st.info("Not enough data per fighting style to compute meaningful correlations.")
+
 # ============================================
 # PAGE 5: Russian Grappler Dominance
 # ============================================
@@ -658,6 +910,72 @@ elif page == "🇷🇺 Russian Grappler Dominance":
             st.success("The difference is statistically significant!")
         else:
             st.warning("The difference is not statistically significant.")
+
+# ------------------------------------
+    # Average Win Rate of Grapplers by Country
+    # ------------------------------------
+    st.subheader("Average Win Rate of Grapplers by Country")
+
+    # Use only grapplers from df_filtered (already has win_rate, total_fights, country, is_grappler)
+    grapplers_df = df_filtered[df_filtered['is_grappler'] == True].copy()
+    grapplers_df = grapplers_df.dropna(subset=['country'])
+
+    # Aggregate: average win rate and number of grappler fighters per country
+    country_stats = (
+        grapplers_df
+        .groupby('country')
+        .agg(
+            avg_win_rate=('win_rate', 'mean'),
+            n_fighters=('fighter_id', 'nunique')
+        )
+        .reset_index()
+    )
+
+    # Optional: keep countries with at least a few grapplers
+    min_grapplers = 5
+    country_stats = country_stats[country_stats['n_fighters'] >= min_grapplers]
+
+    # Sort by average win rate (like your example)
+    country_stats = country_stats.sort_values('avg_win_rate')
+
+    # Overall mean win rate for all grapplers
+    overall_mean = grapplers_df['win_rate'].mean()
+
+    # Colors: highlight Russia in red, others in blue
+    def color_for_country(c):
+        return "#e74c3c" if c.strip().lower() == "russia" else "#5dade2"
+
+    colors = [color_for_country(c) for c in country_stats['country']]
+
+    # Build horizontal bar chart
+    fig_country = go.Figure(
+        go.Bar(
+            x=country_stats['avg_win_rate'],
+            y=country_stats['country'],
+            orientation='h',
+            marker_color=colors,
+            text=country_stats['n_fighters'].apply(lambda n: f"n={n}"),
+            textposition='outside'
+        )
+    )
+
+    # Vertical dashed line at overall mean grappler win rate
+    fig_country.add_vline(
+        x=overall_mean,
+        line_dash="dash",
+        line_color="red",
+        annotation_text=f"Overall Grappler Mean: {overall_mean:.1%}",
+        annotation_position="top right"
+    )
+
+    fig_country.update_layout(
+        title="Average Win Rate of Grapplers by Country",
+        xaxis_title="Average Win Rate",
+        yaxis_title="Country",
+        xaxis_tickformat=".0%"  # show as percentages
+    )
+
+    st.plotly_chart(fig_country, use_container_width=True)
     
     # Top Russian grapplers
     st.subheader("Top Russian Grapplers")

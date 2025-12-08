@@ -6,27 +6,23 @@
 
 Exploratory data analysis of UFC fighter statistics, attributes, and fight history.
 
-## Data
+## Dataset
 
-The `data/` folder contains:
-- `fighter_attributes.csv` - Fighter physical attributes (height, weight, reach, stance, style, country)
+Data sourced from [Kaggle - Comprehensive UFC Data](https://www.kaggle.com/datasets/nickshillito/comprehensive-ufc-data)
+
+- `fighter_attributes.csv` - Fighter physical attributes
 - `fighter_history.csv` - Fight records and results
-- `fighter_stats.csv` - Detailed fight statistics (strikes, takedowns, etc.)
+- `fighter_stats.csv` - Detailed fight statistics
 - `ufc-events.csv` - UFC event information
 
-## Notebooks
+## Analysis Notebooks
 
-- `ufc_data_exploration_1.ipynb` - General data exploration
-- `reach_height_ratio_analysis_2.ipynb` - Analysis of reach/height ratio vs fighter performance
-- `russian_grappler_dominance_3.ipynb` - Analysis of Russian grappler dominance in UFC
+1. `ufc_data_exploration_1.ipynb` - Initial data exploration
+2. `reach_height_ratio_analysis_2.ipynb` - Reach/height ratio vs performance
+3. `russian_grappler_dominance_3.ipynb` - Russian grappler dominance analysis
+4. `age_analysis_4.ipynb` - Fighter age analysis
+5. `fighter_style_analysis_5.ipynb` - Fighting style analysis
 
-## Setup
+## Dashboard
 
-```bash
-conda activate myEnv
-pip install pandas numpy matplotlib seaborn scipy
-```
-
-## Status
-
-🚧 Early stage - Exploratory data analysis in progress
+`streamlit_example_test.py` - Interactive Streamlit dashboard for visualizing the analysis

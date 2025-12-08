@@ -56,7 +56,7 @@ page = st.sidebar.radio("Select Analysis", [
     "Age Analysis",
     "Fighter Style Analysis",
     "Reach/Height Ratio",
-    "🇷🇺 Russian Grappler Dominance"
+    "Russian Grappler Dominance"
 ])
 
 # ============================================
@@ -735,6 +735,7 @@ elif page == "Reach/Height Ratio":
     
     # Filters
     df_filtered = df[(df['reach_height_ratio'].notna()) & (df['total_fights'] >= min_fights)]
+    df_experienced = df_filtered[df_filtered['total_fights'] >= 10]
     
     # Stats
     col1, col2, col3 = st.columns(3)
@@ -742,96 +743,167 @@ elif page == "Reach/Height Ratio":
     col2.metric("Avg Ratio", f"{df_filtered['reach_height_ratio'].mean():.3f}")
     col3.metric("Avg Win Rate", f"{df_filtered['win_rate'].mean():.1%}")
     
-    # Scatter plot
-    st.subheader("Reach/Height Ratio vs Win Rate")
-    fig = px.scatter(df_filtered, x='reach_height_ratio', y='win_rate',
-                     color='weight_class', hover_data=['name'],
-                     labels={'reach_height_ratio': 'Reach/Height Ratio', 'win_rate': 'Win Rate'},
-                     opacity=0.6)
+    # ------------------------------------
+    # Main Question: Reach/Height Ratio vs Win Rate (Side-by-side scatter plots)
+    # ------------------------------------
+    st.subheader("Reach/Height Ratio vs Win Rate - The Main Question")
     
-    # Add trend line
-    z = np.polyfit(df_filtered['reach_height_ratio'], df_filtered['win_rate'], 1)
-    x_line = np.linspace(df_filtered['reach_height_ratio'].min(), df_filtered['reach_height_ratio'].max(), 100)
-    fig.add_trace(go.Scatter(x=x_line, y=np.poly1d(z)(x_line), mode='lines', 
-                             name='Trend', line=dict(color='red', width=2)))
+    # Calculate correlations
+    corr_all, p_val_all = pearsonr(df_filtered['reach_height_ratio'], df_filtered['win_rate'])
+    corr_exp, p_val_exp = pearsonr(df_experienced['reach_height_ratio'], df_experienced['win_rate'])
+    
+    from plotly.subplots import make_subplots
+    
+    fig = make_subplots(rows=1, cols=2, 
+                        subplot_titles=[f'All Fighters<br>Correlation: {corr_all:.4f} (p={p_val_all:.4f})',
+                                        f'Experienced Fighters (10+ fights)<br>Correlation: {corr_exp:.4f} (p={p_val_exp:.4f})'])
+    
+    # All Fighters scatter
+    fig.add_trace(
+        go.Scatter(x=df_filtered['reach_height_ratio'], y=df_filtered['win_rate'],
+                   mode='markers', marker=dict(color='steelblue', opacity=0.3),
+                   name='All Fighters', showlegend=False),
+        row=1, col=1
+    )
+    
+    # Trend line for all fighters
+    z1 = np.polyfit(df_filtered['reach_height_ratio'], df_filtered['win_rate'], 1)
+    x_line1 = np.linspace(df_filtered['reach_height_ratio'].min(), df_filtered['reach_height_ratio'].max(), 100)
+    fig.add_trace(
+        go.Scatter(x=x_line1, y=np.poly1d(z1)(x_line1), mode='lines',
+                   line=dict(color='red', width=2), name='Trend', showlegend=True),
+        row=1, col=1
+    )
+    
+    # Experienced Fighters scatter
+    fig.add_trace(
+        go.Scatter(x=df_experienced['reach_height_ratio'], y=df_experienced['win_rate'],
+                   mode='markers', marker=dict(color='darkgreen', opacity=0.4),
+                   name='Experienced Fighters', showlegend=False),
+        row=1, col=2
+    )
+    
+    # Trend line for experienced fighters
+    z2 = np.polyfit(df_experienced['reach_height_ratio'], df_experienced['win_rate'], 1)
+    x_line2 = np.linspace(df_experienced['reach_height_ratio'].min(), df_experienced['reach_height_ratio'].max(), 100)
+    fig.add_trace(
+        go.Scatter(x=x_line2, y=np.poly1d(z2)(x_line2), mode='lines',
+                   line=dict(color='red', width=2), name='Trend', showlegend=False),
+        row=1, col=2
+    )
+    
+    fig.update_xaxes(title_text='Reach / Height', row=1, col=1)
+    fig.update_xaxes(title_text='Reach / Height', row=1, col=2)
+    fig.update_yaxes(title_text='Win Rate', row=1, col=1)
+    fig.update_yaxes(title_text='Win Rate', row=1, col=2)
+    fig.update_layout(height=500, showlegend=True)
+    
     st.plotly_chart(fig, use_container_width=True)
     
-    # Correlation
-    corr, p_val = pearsonr(df_filtered['reach_height_ratio'], df_filtered['win_rate'])
-    st.write(f"**Correlation**: {corr:.4f} (p-value: {p_val:.4f})")
+    st.markdown("There appears to be some positive correlation of reach/height ratio impacting the win rate of fighters")
     
-    # Quintile comparison
-    st.subheader("Win Rate by Ratio Quintile")
-    df_filtered['quintile'] = pd.qcut(df_filtered['reach_height_ratio'], q=5, 
-                                       labels=['Very Low', 'Low', 'Medium', 'High', 'Very High'])
-    quintile_rates = df_filtered.groupby('quintile')['win_rate'].mean()
-    
-    fig2 = px.bar(x=quintile_rates.index.astype(str), y=quintile_rates.values,
-                  labels={'x': 'Reach/Height Quintile', 'y': 'Win Rate'},
-                  color=quintile_rates.values, color_continuous_scale='RdYlGn')
-    st.plotly_chart(fig2, use_container_width=True)
-
-# ------------------------------------
-    # Correlation between Reach/Height Ratio and Win Rate by Fighting Style
     # ------------------------------------
-    st.subheader("Correlation Between Reach/Height Ratio and Win Rate by Fighting Style")
+    # Analysis by Stance (Faceted scatter plots)
+    # ------------------------------------
+    st.subheader("Reach/Height Ratio vs Win Rate by Stance")
+    
+    stance_counts = df_filtered.groupby('stance').size()
+    stances_with_enough_data = stance_counts[stance_counts >= 30].index.tolist()
+    
+    if len(stances_with_enough_data) > 0:
+        # Pre-calculate titles
+        stance_titles = []
+        for stance in stances_with_enough_data:
+            stance_data = df_filtered[df_filtered['stance'] == stance]
+            corr_val, p_val = pearsonr(stance_data['reach_height_ratio'], stance_data['win_rate'])
+            stance_titles.append(f'{stance}<br>r={corr_val:.3f}, p={p_val:.3f}, n={len(stance_data)}')
+        
+        fig_stance = make_subplots(rows=1, cols=len(stances_with_enough_data),
+                                    subplot_titles=stance_titles)
+        
+        for i, stance in enumerate(stances_with_enough_data):
+            stance_data = df_filtered[df_filtered['stance'] == stance]
+            
+            # Scatter plot
+            fig_stance.add_trace(
+                go.Scatter(x=stance_data['reach_height_ratio'], y=stance_data['win_rate'],
+                           mode='markers', marker=dict(color='steelblue', opacity=0.4),
+                           name=stance, showlegend=False),
+                row=1, col=i+1
+            )
+            
+            # Trend line
+            z = np.polyfit(stance_data['reach_height_ratio'], stance_data['win_rate'], 1)
+            x_range = np.linspace(stance_data['reach_height_ratio'].min(), stance_data['reach_height_ratio'].max(), 100)
+            fig_stance.add_trace(
+                go.Scatter(x=x_range, y=np.poly1d(z)(x_range), mode='lines',
+                           line=dict(color='red', width=2), showlegend=False),
+                row=1, col=i+1
+            )
+            
+            fig_stance.update_xaxes(title_text='Reach/Height', row=1, col=i+1)
+            fig_stance.update_yaxes(title_text='Win Rate', row=1, col=i+1)
+        
+        fig_stance.update_layout(height=450, title_text='Reach/Height Ratio vs Win Rate by Stance')
+        st.plotly_chart(fig_stance, use_container_width=True)
+        
+        st.markdown("Reach/height ratio seems to impact win rate for the southpaw stance the most.")
 
-    # Compute correlation per *raw* style (not grouped)
-    corr_rows = []
-    # Drop styles that are missing
-    df_style = df_filtered.dropna(subset=['style']).copy()
+    # ------------------------------------
+    # Correlation by Fighting Style (Horizontal Bar Chart)
+    # ------------------------------------
+    st.subheader("Correlation: Reach/Height Ratio vs Win Rate by Style")
 
-    for style, sub in df_style.groupby('style'):
-        # Require a reasonable sample size and variation
-        if (
-            len(sub) >= 10 and
-            sub['reach_height_ratio'].nunique() > 1 and
-            sub['win_rate'].nunique() > 1
-        ):
-            c, p = pearsonr(sub['reach_height_ratio'], sub['win_rate'])
-            corr_rows.append({
-                "style": style,
-                "correlation": c,
-                "p_value": p,
-                "n_fighters": len(sub)
+    # Compute correlation per style
+    def calc_style_correlation(group):
+        if len(group) >= 20:
+            corr, pval = pearsonr(group['reach_height_ratio'], group['win_rate'])
+            return pd.Series({
+                'n': len(group),
+                'correlation': corr,
+                'p_value': pval
             })
-
-    if corr_rows:
-        corr_df = pd.DataFrame(corr_rows)
-
-        # Sort so negative correlations at top, positives at bottom (like your example)
-        corr_df = corr_df.sort_values("correlation", ascending=True)
-
+        return None
+    
+    df_style = df_filtered.dropna(subset=['style']).copy()
+    style_results = df_style.groupby('style').apply(calc_style_correlation).dropna()
+    
+    if len(style_results) > 0:
+        style_results = style_results.sort_values('correlation', ascending=True)
+        
         # Color bars: red for negative, green for positive
-        colors = ["#e74c3c" if c < 0 else "#27ae60" for c in corr_df["correlation"]]
-
-        # Horizontal bar chart
-        fig_style_corr = go.Figure(
+        colors = ['#e74c3c' if c < 0 else '#27ae60' for c in style_results['correlation']]
+        
+        fig_style = go.Figure(
             go.Bar(
-                x=corr_df["correlation"],
-                y=corr_df["style"],
-                orientation="h",
+                x=style_results['correlation'],
+                y=style_results.index,
+                orientation='h',
                 marker_color=colors
             )
         )
-
-        # Vertical line at 0
-        fig_style_corr.add_vline(x=0, line_width=2, line_color="black")
-
-        fig_style_corr.update_layout(
-            title="Correlation between Reach/Height Ratio and Win Rate by Fighting Style",
-            xaxis_title="Correlation (Reach/Height Ratio vs Win Rate)",
-            yaxis_title="Fighting Style",
-            xaxis=dict(range=[-0.35, 0.35])  # tweak this if your values are narrower/wider
+        
+        fig_style.add_vline(x=0, line_width=2, line_color='black')
+        
+        fig_style.update_layout(
+            title='Correlation: Reach/Height Ratio vs Win Rate by Style',
+            xaxis_title='Correlation',
+            yaxis_title='Style',
+            height=500
         )
-
-        st.plotly_chart(fig_style_corr, use_container_width=True)
-
-        # Optional: show numeric table below
+        
+        st.plotly_chart(fig_style, use_container_width=True)
+        
+        st.markdown("""
+        Reach/Height ratio seems to have the strongest correlation with boxing. This makes sense as this is where the advantage would help the most.
+        """)
+        
+        # Show data table
         st.dataframe(
-            corr_df[["style", "correlation", "p_value", "n_fighters"]].style.format({
-                "correlation": "{:.3f}",
-                "p_value": "{:.4f}"
+            style_results[['correlation', 'p_value', 'n']].style.format({
+                'correlation': '{:.3f}',
+                'p_value': '{:.4f}',
+                'n': '{:.0f}'
             })
         )
     else:
@@ -840,7 +912,7 @@ elif page == "Reach/Height Ratio":
 # ============================================
 # PAGE 5: Russian Grappler Dominance
 # ============================================
-elif page == "🇷🇺 Russian Grappler Dominance":
+elif page == "Russian Grappler Dominance":
     st.header("Russian Grappler Dominance Analysis")
     st.markdown("Are Russian grapplers more dominant in the UFC?")
     min_fights = 3
